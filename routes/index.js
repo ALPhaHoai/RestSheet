@@ -1,6 +1,6 @@
-var express = require('express');
-var googlesheet = require('./googlesheet');
-var router = express.Router();
+const express = require('express');
+const googlesheet = require('./googlesheet');
+const router = express.Router();
 
 router.get('/', function (req, res, next) {
   const limit = Math.max(parseInt(req.limit) || 100, 100)

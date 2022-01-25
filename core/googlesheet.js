@@ -1,23 +1,32 @@
-var express = require('express');
-var router = express.Router();
+const express = require('express');
+const config = require('../config');
 const fs = require('fs');
 const readline = require('readline');
 const {google} = require('googleapis');
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 const TOKEN_PATH = 'token.json';
-const {spreadsheets} = require("../config")
+const maxRows = 10000
+const maxColumns = 50
 
-let auth
-
-async function getAuth() {
-    if (auth) return auth
-    return new Promise((resolve, reject) => {
-        authorize(function (oAuth2Client) {
-            auth = oAuth2Client
-            resolve(auth)
-        })
-    })
+async function getSheetApi() {
+    const auth = await getAuth()
+    const sheets = google.sheets({version: 'v4', auth});
+    return sheets
 }
+
+const getAuth = (function () {
+    let auth
+
+    return async function () {
+        if (auth) return auth
+        return new Promise((resolve, reject) => {
+            authorize(function (oAuth2Client) {
+                auth = oAuth2Client
+                resolve(auth)
+            })
+        })
+    }
+})()
 
 function authorize(resolve) {
     fs.readFile('credentials.json', (err, content) => {
@@ -122,30 +131,15 @@ function getNewToken(oAuth2Client, callback) {
     });
 }
 
-
-async function getSheetData(spreadsheetId, sheetName) {
-    const auth = await getAuth()
-    const sheets = google.sheets({version: 'v4', auth});
-    return new Promise(resolve => {
-        sheets.spreadsheets.values.get({
-            spreadsheetId: spreadsheetId,
-            range: `'${sheetName}!'A1:ZZ1000`,
-        }, (err, res) => {
-            if (err) {
-                resolve()
-            } else {
-                resolve(res.data.values)
-            }
-        });
-    })
-}
-
+//index >= 1
 function getColumnLabelFromIndex(index) {
-    try {
-        const str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    const str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    if (index <= str.length) {
         return str[index - 1]
-    } catch (e) {
-        return str[str.length]
+    } else {
+        const times = Math.floor(index / str.length)
+        const sub = index - times * str.length + 1;
+        return getColumnLabelFromIndex(times) + (sub > 0 ? getColumnLabelFromIndex(sub) : '')
     }
 }
 
@@ -167,298 +161,136 @@ function getColumLabel(data, label) {
     }
 }
 
-async function updateProducts(productList) {
-    const auth = await getAuth()
-    const sheets = google.sheets({version: 'v4', auth});
-
-    for (let i1 = 0; i1 < spreadsheets.length; i1++) {
-        let {
-            spreadsheetId,
-            mainSheetName,
-            basePriceColumn,
-            promotePriceColumn,
-            productStockColumn,
-            inventoryStockColumn,
-            productImageColumn,
-            productNameColumn,
-            tradeMarkNameColumn,
-            availability_InstockName,
-            availability_SoldoutName,
-            productImageColumnWidth,
-            productImageColumnMode,
-            productImageColumnHeight,
-            promotePriceFormat,
-            productWebLinkColumn,
-            productSpecificationColumn,
-        } = spreadsheets[i1];
-
-        const spreadData = await getSpreadData(spreadsheetId);
-        if (!Array.isArray(spreadData) || !spreadData.length) {
-            console.log("Cant get spreadData " + spreadsheetId);
-            continue
-        }
-
-        const updateData = []
-        for (let i = 0; i < spreadData.length; i++) {
-            const sheetInfo = spreadData[i]
-            let sheetData = sheetInfo.data.values
-            const sheetName = sheetInfo.properties.title
-            if (!Array.isArray(sheetData) || !sheetData.length) continue//sheet is empty
-            const basePriceColumnLabel = getColumLabel(sheetData, basePriceColumn)
-            const promotePriceColumnLabel = getColumLabel(sheetData, promotePriceColumn)
-            const productStockColumnLabel = getColumLabel(sheetData, productStockColumn)
-            const inventoryStockColumnLabel = getColumLabel(sheetData, inventoryStockColumn)
-            const productImageColumnLabel = getColumLabel(sheetData, productImageColumn)
-            const productNameColumnLabel = getColumLabel(sheetData, productNameColumn)
-            const productWebLinkColumnLabel = getColumLabel(sheetData, productWebLinkColumn)
-            const productSpecificationColumnLabel = getColumLabel(sheetData, productSpecificationColumn)
-            const tradeMarkNameColumnLabel = getColumLabel(sheetData, tradeMarkNameColumn)
-
-            let endRow = sheetData.length
-            for (let i = 0; i < productList.length; i++) {
-                try {
-                    let {
-                        product_code,
-                        productName,
-                        basePrice,
-                        promote_price,
-                        productStock,
-                        kiotvietImages,
-                        categoryName,
-                        tradeMarkName,
-                        ProductWebLink,
-                        productSpecification,
-                    } = productList[i]
-
-                    if (mainSheetName) {
-                        if (mainSheetName !== sheetName) continue
-                    } else {
-                        if (tradeMarkName !== sheetName) continue
-                    }
-
-                    let productRowIndex = getProductSheetRowIndex(sheetData, product_code)
-                    const isInsertNewRow = typeof productRowIndex === "undefined"
-                    if (isInsertNewRow) {
-                        //insert new row
-                        productRowIndex = ++endRow
-
-                        updateData.push({
-                            range: `'${sheetName}'!` + "A" + productRowIndex,
-                            values: [[product_code]]
-                        })
-                    }
-
-                    if (productName !== undefined && productNameColumnLabel) {
-                        updateData.push({
-                            range: `'${sheetName}'!` + productNameColumnLabel + productRowIndex,
-                            values: [[productName]]
-                        })
-                    }
-
-                    if (ProductWebLink !== undefined && productWebLinkColumnLabel) {
-                        updateData.push({
-                            range: `'${sheetName}'!` + productWebLinkColumnLabel + productRowIndex,
-                            values: [[ProductWebLink]]
-                        })
-                    }
-
-                    if (productSpecification !== undefined && productSpecificationColumnLabel) {
-                        updateData.push({
-                            range: `'${sheetName}'!` + productSpecificationColumnLabel + productRowIndex,
-                            values: [[productSpecification]]
-                        })
-                    }
-
-                    if (basePrice !== undefined && basePriceColumnLabel) {
-                        if (basePrice === null || basePrice === "") basePrice = 0;
-                        updateData.push({
-                            range: `'${sheetName}'!` + basePriceColumnLabel + productRowIndex,
-                            values: [[basePrice + " VND"]]
-                        })
-                    }
-                    if (promote_price !== undefined && promotePriceColumnLabel) {
-                        if (promote_price === null || promote_price === "") promote_price = 0;
-                        let value = promote_price + " VND"
-
-                        if (typeof promotePriceFormat === "function") {
-                            value = promotePriceFormat(promote_price)
-                        }
-
-                        updateData.push({
-                            range: `'${sheetName}'!` + promotePriceColumnLabel + productRowIndex,
-                            values: [[value]]
-                        })
-                    }
-                    if (tradeMarkName !== undefined && tradeMarkNameColumnLabel) {
-                        updateData.push({
-                            range: `'${sheetName}'!` + tradeMarkNameColumnLabel + productRowIndex,
-                            values: [[tradeMarkName]]
-                        })
-                    }
-                    if (Array.isArray(kiotvietImages) && productImageColumnLabel) {
-                        let value = kiotvietImages[0] || ""
-                        if (value) {
-                            if (productImageColumnMode === 4) {
-                                value = `=IMAGE("${value}"; 4; ${productImageColumnWidth}; ${productImageColumnHeight})`
-                            } else {
-                                value = `=IMAGE("${value}"; ${productImageColumnMode})`
-                            }
-                        }
-                        updateData.push({
-                            range: `'${sheetName}'!` + productImageColumnLabel + productRowIndex,
-                            values: [[value]],
-                        })
-                    }
-                    if (!isNaN(productStock)) {
-                        if (productStockColumnLabel) {
-                            const value = productStock > 0 ? availability_InstockName : availability_SoldoutName
-                            updateData.push({
-                                range: `'${sheetName}'!` + productStockColumnLabel + productRowIndex,
-                                values: [[value]]
-                            })
-                        }
-                        if (inventoryStockColumnLabel) {
-                            updateData.push({
-                                range: `'${sheetName}'!` + inventoryStockColumnLabel + productRowIndex,
-                                values: [[productStock]]
-                            })
-                        }
-                    }
-                } catch (e) {
-                    console.log(e);
-                }
-            }
-        }
-        const params = {
-            spreadsheetId,
-            resource: {
-                data: updateData,
-                valueInputOption: "USER_ENTERED",
-            },
-        };
-        if (updateData.length) {
-            await batchUpdateAsync(params, sheets)
-        }
-    }
-}
-
-function batchUpdateAsync(params, sheets, sleepTime = 1) {
-    return new Promise(resolve => {
-        batchUpdateCallback(params, sheets, function (err) {
-            resolve(err)
-        }, sleepTime)
-    })
-}
-
-function batchUpdateCallback(params, sheets, callback, sleepTime = 1) {
-    console.log("spreadsheets batchUpdate", sleepTime);
-    sheets.spreadsheets.values.batchUpdate(params, (err, result) => {
-        if (err) {
-            console.log(err);
-            if (sleepTime > 10) {
-                callback(err)
-            } else {
-                setTimeout(function () {
-                    batchUpdateCallback(params, sheets, callback, sleepTime * 2)
-                }, sleepTime * 1000)
-            }
-        } else {
-            callback()
-        }
-    });
-}
-
-function getProductSheetRowIndex(data, product_code) {
-    for (let i = 0; i < data.length; i++) {
-        const row = data[i]
-        if (row[0] == product_code) {
-            return (i + 1)
-        }
-    }
-}
-
-async function getSpreadData(spreadsheetId) {
+async function getSpreadData(spreadsheetId, sheetName) {
     if (!spreadsheetId) {
         return
     }
 
     let spreadInfo = await getSpreadInfo(spreadsheetId);
     if (!Array.isArray(spreadInfo.sheets)) return
-    const ranges = []
 
-    for (let i = 0; i < spreadInfo.sheets.length; i++) {
-        const {properties: {sheetId, title, index, sheetType}} = spreadInfo.sheets[i]
-        ranges.push(`'${title}'!A1:ZZ1000`)
+    if (sheetName) {
+        if (!Array.isArray(sheetName)) {
+            sheetName = [sheetName]
+        }
+    } else {
+        sheetName = spreadInfo.sheets.map(s => s.properties.title)
     }
 
-    const auth = await getAuth()
-    const sheets = google.sheets({version: 'v4', auth});
+    const ranges = sheetName.map(s => `'${s}'!1:${maxRows}`)
 
-    return new Promise(resolve => {
-        getSpreadDataCallback(sheets, spreadInfo, ranges, spreadsheetId, function (data) {
-            resolve(data)
-        })
-    })
+    const sheetApi = await getSheetApi()
+
+    try {
+        const result = await sheetApi.spreadsheets.values.batchGet({
+            spreadsheetId: spreadsheetId,
+            ranges,
+        });
+        return result?.data?.valueRanges?.[0]?.values
+    } catch (e) {
+        console.error(e);
+        return null
+    }
 }
 
-function getSpreadDataCallback(sheets, spreadInfo, ranges, spreadsheetId, callback, retry = 1) {
-    if (!spreadsheetId) {
-        callback()
+async function getSheetDataInfo(spreadsheetId, sheetName) {
+    if (!spreadsheetId || !sheetName) {
         return
     }
 
-    if (!spreadInfo || !Array.isArray(spreadInfo.sheets)) {
-        callback()
+    const sheetApi = await getSheetApi()
+
+    try {
+        const result = await sheetApi.spreadsheets.values.batchGet({
+            spreadsheetId: spreadsheetId,
+            ranges: [`'${sheetName}'!A1:A${maxRows}`, `'${sheetName}'!1:1`],
+        });
+        const idData = result?.data?.valueRanges?.[0]?.values
+        const columns = result?.data?.valueRanges?.[1]?.values?.[0]
+        return idData && columns ? {columns, idData} : null
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function getSheetIdData(spreadsheetId, sheetName) {
+    if (!spreadsheetId || !sheetName) {
         return
     }
 
-    sheets.spreadsheets.values.batchGet({
-        spreadsheetId: spreadsheetId,
-        ranges,
-    }, (err, res) => {
-        if (err) {
-            if (retry > 10) {
-                callback()
-            } else {
-                setTimeout(function () {
-                    getSpreadDataCallback(sheets, spreadInfo, ranges, spreadsheetId, callback, retry + 1)
-                }, retry * 1000)
+    const sheetApi = await getSheetApi()
+
+    try {
+        const result = await sheetApi.spreadsheets.values.batchGet({
+            spreadsheetId: spreadsheetId,
+            ranges: [`'${sheetName}'!A1:A${maxRows}`],
+        });
+        return result?.data?.valueRanges?.[0]?.values
+    } catch (e) {
+        console.error(e);
+        return false
+    }
+}
+
+async function createSheet(spreadsheetId, name) {
+    const sheetApi = await getSheetApi()
+    try {
+        const result = await sheetApi.spreadsheets.batchUpdate({
+            spreadsheetId: spreadsheetId,
+            resource: {
+                requests: [{
+                    addSheet: {
+                        properties: {
+                            title: name,
+                            gridProperties: {
+                                rowCount: maxRows,
+                                columnCount: maxColumns
+                                // columnCount: columns.length + 1
+                            },
+                            tabColor: {
+                                red: Math.random(),
+                                green: Math.random(),
+                                blue: Math.random()
+                            }
+                        }
+                    }
+                }]
             }
-        } else {
-            for (let i = 0; i < spreadInfo.sheets.length; i++) {
-                spreadInfo.sheets[i].data = res.data.valueRanges[i]
-            }
-            callback(spreadInfo.sheets)
-        }
-    });
+        });
+
+        return true
+    } catch (err) {
+        console.error('Sheets API Error: ' + err);
+        return false
+    }
 }
 
 
 /*
 *
 * {
-  "spreadsheetId": "1Ktfyuaqvt6oiS014mSPoM7HmXJZFrExHk1h-OH5v1Hc",
-  "properties": {
-    "title": "facebbook product",
-    "locale": "vi_VN",
-    "autoRecalc": "ON_CHANGE",
-    "timeZone": "Asia/Saigon",
+  spreadsheetId: "1Ktfyuaqvt6oiS014mSPoM7HmXJZFrExHk1h-OH5v1Hc",
+  properties: {
+    title: "facebbook product",
+    locale: "vi_VN",
+    autoRecalc: "ON_CHANGE",
+    timeZone: "Asia/Saigon",
   },
-  "sheets": [
+  sheets: [
     {
-      "properties": {
-        "sheetId": 0,
-        "title": "Trang tính1",
-        "index": 0,
-        "sheetType": "GRID",
-        "gridProperties": {
-          "rowCount": 887,
-          "columnCount": 21
+      properties: {
+        sheetId: 0,
+        title: "Trang tính1",
+        index: 0,
+        sheetType: "GRID",
+        gridProperties: {
+          rowCount: 887,
+          columnCount: 21
         }
       },
     }
   ],
-  "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/1Ktfyuaqvt6oiS014mSPoM7HmXJZFrExHk1h-OH5v1Hc/edit"
+  spreadsheetUrl: "https://docs.google.com/spreadsheets/d/1Ktfyuaqvt6oiS014mSPoM7HmXJZFrExHk1h-OH5v1Hc/edit"
 }
 * */
 async function getSpreadInfo(spreadsheetId) {
@@ -466,63 +298,99 @@ async function getSpreadInfo(spreadsheetId) {
         return
     }
 
-    const auth = await getAuth()
-    const sheets = google.sheets({version: 'v4', auth});
+    const sheetApi = await getSheetApi()
 
-    return new Promise(resolve => {
-        getSpreadInfoCallback(sheets, spreadsheetId, function (data) {
-            resolve(data)
-        })
-    })
-}
-
-function getSpreadInfoCallback(sheets, spreadsheetId, callback, retry = 1) {
-    if (!spreadsheetId) {
-        callback()
-    } else {
-        sheets.spreadsheets.get({
+    try {
+        const result = await sheetApi.spreadsheets.get({
             spreadsheetId: spreadsheetId,
-        }, (err, res) => {
-            if (err) {
-                if (retry > 10) {
-                    callback()
-                } else {
-                    setTimeout(function () {
-                        getSpreadInfoCallback(sheets, spreadsheetId, callback, retry + 1)
-                    }, retry * 1000)
-                }
-            } else callback(res.data)
         });
+        return result?.data
+    } catch (e) {
+        console.error(e);
     }
 }
 
-async function getProducstCode() {
-    let data = []
-    for (let i = 0; i < spreadsheets.length; i++) {
-        let {spreadsheetId} = spreadsheets[i];
-        const sheets = await getSpreadData(spreadsheetId)
-        if (Array.isArray(sheets)) {
-            for (let j = 0; j < sheets.length; j++) {
-                const values = sheets[j].data.values
-                for (let k = 0; k < values.length; k++) {
-                    const value = values[k]
-                    if (value && value[0] && value[0].toLocaleLowerCase() !== "id") {
-                        data.push(value[0])
-                    }
-                }
-            }
-        }
-    }
-    return data
+async function isHasSheet(spreadsheetId, sheetName) {
+    const spreadInfo = await getSpreadInfo(spreadsheetId)
+    return spreadInfo?.sheets?.some(s => s?.properties?.title == sheetName)
 }
+
+async function fillRow(spreadsheetId, sheetName, rowIndex, values) {
+    const params = {
+        spreadsheetId,
+        resource: {
+            data: [{
+                range: `'${sheetName}'!${rowIndex}:${rowIndex}`,
+                values: [values]
+            }],
+            valueInputOption: "USER_ENTERED",
+        },
+    };
+
+    const sheetApi = await getSheetApi()
+
+    try {
+        const result = await sheetApi.spreadsheets.values.batchUpdate(params);
+        return result?.data
+    } catch (e) {
+        console.error(e);
+    }
+
+}
+
+async function insertRows(spreadsheetId, sheetName, rows) {
+    const sheetIdData = await getSheetDataInfo(spreadsheetId, sheetName)
+    if (!sheetIdData?.columns) return false
+    const {columns, idData} = sheetIdData
+    let nextIndex = idData.length + 1
+
+    const data = []
+    for (let i = 0; i < rows.length; i++) {
+        const item = rows[i]
+
+        for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+            const column = columns[columnIndex]
+            let columnLabel = getColumnLabelFromIndex(columnIndex + 1)
+            let value = item[column]
+            if (value === null || value === undefined) {
+                value = ""
+            }
+            data.push({
+                range: `'${sheetName}'!${columnLabel}${nextIndex}:${columnLabel}${nextIndex}`,
+                values: [[value]]
+            })
+        }
+
+        nextIndex++
+    }
+
+    const params = {
+        spreadsheetId,
+        resource: {
+            data,
+            valueInputOption: "USER_ENTERED",
+        },
+    };
+
+    const sheetApi = await getSheetApi()
+
+    try {
+        const result = await sheetApi.spreadsheets.values.batchUpdate(params);
+        return result?.data
+    } catch (e) {
+        console.error(e);
+    }
+
+}
+
 
 module.exports = {
     generateAuthUrl,
     updateCode,
-    updateSpreadsheetId: function (_sheetId) {
-        // spreadsheetId = _sheetId
-    },
-    getProducstCode,
-    updateProducts,
     getSpreadData,
+    createSheet,
+    getSpreadInfo,
+    isHasSheet,
+    fillRow,
+    insertRows,
 }
