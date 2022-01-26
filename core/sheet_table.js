@@ -3,7 +3,7 @@ const googlesheet = require("./googlesheet");
 const spreadsheetId = spreadsheets[0].spreadsheetId
 const {v4: uuidv4} = require('uuid')
 
-module.exports = {
+const sheet_table = {
     async createTable(name, columns) {
         if (!columns?.includes('Id')) {
             return {
@@ -58,6 +58,12 @@ module.exports = {
         return _data
     },
     async insertRows(tableName, rows) {
+        if (!Array.isArray(rows)) {
+            return {
+                success: false,
+                msg: `Rows input invalid`
+            }
+        }
         rows.forEach(r => r.Id = uuidv4())
         const result = await googlesheet.insertRows(spreadsheetId, tableName, rows)
         return result ? {
@@ -67,5 +73,45 @@ module.exports = {
             success: false,
             msg: `Can not insert ${rows.length} row(s) in table ${tableName}`
         }
+    },
+    async find(tableName, conditions, limit = undefined, withIndex = false) {
+        const data = await googlesheet.getSpreadData(spreadsheetId, tableName)
+        if (!Array.isArray(data)) return []
+        const columns = data[0]
+        const results = []
+        for (let i = 1; i < data.length; i++) {
+            let match = true
+            for (let j = 0; j < columns.length; j++) {
+                const column = columns[j]
+                if (conditions[column] !== undefined) {
+                    if (conditions[column] !== data[i][j]) {
+                        match = false
+                        break
+                    }
+                }
+            }
+            if (match) {
+                const obj = {}
+                for (let j = 0; j < columns.length; j++) {
+                    const column = columns[j]
+                    obj[column] = data[i][j]
+                }
+                if (withIndex) {
+                    obj._Index = i + 1
+                }
+                results.push(obj)
+                if (typeof limit === "number" && limit <= results.length) {
+                    break
+                }
+            }
+        }
+        return results
+    },
+    async delete(tableName, conditions) {
+        const data = await sheet_table.find(tableName, conditions, undefined, true)
+        if (!Array.isArray(data)) return false
+        return await googlesheet.deleteRows(spreadsheetId, tableName, data.map(r => r._Index))
     }
 }
+
+module.exports = sheet_table

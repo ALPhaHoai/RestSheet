@@ -52,6 +52,32 @@ router.post('/insertRows', async function (req, res, next) {
     const data = await sheet_table.insertRows(name, rows);
     res.json(data);
 });
+router.post('/findOne', async function (req, res, next) {
+    const {name, conditions} = req.body
+    const data = await sheet_table.find(name, conditions, 1);
+    if (Array.isArray(data)) {
+        res.json(data[0]);
+    } else {
+        res.json({});
+    }
+
+});
+
+router.post('/find', async function (req, res, next) {
+    const {name, conditions, limit} = req.body
+    if (typeof limit === "number" && limit < 1) {
+        res.json([]);
+    } else {
+        const data = await sheet_table.find(name, conditions, limit);
+        res.json(data);
+    }
+});
+
+router.post('/delete', async function (req, res, next) {
+    const {name, conditions} = req.body
+    const data = await sheet_table.delete(name, conditions);
+    res.json(data);
+});
 
 
 module.exports = router

@@ -383,6 +383,42 @@ async function insertRows(spreadsheetId, sheetName, rows) {
 
 }
 
+async function deleteRows(spreadsheetId, sheetName, rowsIndex) {
+    const spreadInfo = await getSpreadInfo(spreadsheetId)
+    if (!spreadInfo) return
+    const sheetId = spreadInfo.sheets.find(s => s.properties.title === sheetName)?.properties?.sheetId
+    if (!sheetId) return
+    rowsIndex.sort()
+    const sheetApi = await getSheetApi()
+
+    try {
+        let offsetIndex = 0
+        const result = await sheetApi.spreadsheets.batchUpdate({
+            spreadsheetId,
+            resource: {
+                requests: rowsIndex.map(function (index) {
+                    const deleteDimension = {
+                        deleteDimension: {
+                            range: {
+                                sheetId: sheetId,
+                                dimension: "ROWS",
+                                startIndex: index - 1 - offsetIndex,
+                                endIndex: index - offsetIndex
+                            }
+                        }
+                    };
+                    offsetIndex++
+                    return deleteDimension;
+                })
+            }
+        });
+        return result?.data
+    } catch (e) {
+        console.error(e);
+    }
+
+}
+
 
 module.exports = {
     generateAuthUrl,
@@ -393,4 +429,5 @@ module.exports = {
     isHasSheet,
     fillRow,
     insertRows,
+    deleteRows,
 }
