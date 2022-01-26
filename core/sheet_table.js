@@ -110,7 +110,15 @@ const sheet_table = {
     async delete(tableName, conditions) {
         const data = await sheet_table.find(tableName, conditions, undefined, true)
         if (!Array.isArray(data)) return false
-        return await googlesheet.deleteRows(spreadsheetId, tableName, data.map(r => r._Index))
+        const result = await googlesheet.deleteRows(spreadsheetId, tableName, data.map(r => r._Index))
+        if (result) {
+            return {
+                success: true,
+                deletedRow: data.map(r => ({Id: r.Id}))
+            }
+        } else return {
+            success: false,
+        }
     }
 }
 
