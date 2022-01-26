@@ -3,6 +3,7 @@ const config = require('../config');
 const fs = require('fs');
 const readline = require('readline');
 const {google} = require('googleapis');
+const {tableConfig} = require("../config");
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 const TOKEN_PATH = 'token.json';
 const maxRows = 10000
@@ -383,6 +384,65 @@ async function insertRows(spreadsheetId, sheetName, rows) {
 
 }
 
+async function updateRows(spreadsheetId, sheetName, row, rowsIndex) {
+    const sheetIdData = await getSheetDataInfo(spreadsheetId, sheetName)
+    if (!sheetIdData?.columns) return false
+    const {columns, idData} = sheetIdData
+
+    const data = []
+    for (let i = 0; i < rowsIndex.length; i++) {
+        const index = rowsIndex[i]
+
+        for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+            const column = columns[columnIndex]
+            let columnLabel = getColumnLabelFromIndex(columnIndex + 1)
+            if (row.hasOwnProperty(column)) {
+                let value = row[column]
+                if (value === null || value === undefined) {
+                    value = ""
+                }
+                data.push({
+                    range: `'${sheetName}'!${columnLabel}${index}:${columnLabel}${index}`,
+                    values: [[value]]
+                })
+            }
+        }
+    }
+
+    if (!data.length) {
+        return {
+            success: false,
+            msg: 'There is no row meets the condition'
+        }
+    }
+
+    const params = {
+        spreadsheetId,
+        resource: {
+            data,
+            valueInputOption: "USER_ENTERED",
+        },
+    };
+
+    const sheetApi = await getSheetApi()
+
+    try {
+        const result = await sheetApi.spreadsheets.values.batchUpdate(params);
+        return result?.data ? {
+            success: true,
+            totalUpdatedRows: result?.data?.totalUpdatedRows,
+        } : {
+            success: false,
+        }
+    } catch (e) {
+        console.error(e);
+        return {
+            success: false,
+        }
+    }
+
+}
+
 async function deleteRows(spreadsheetId, sheetName, rowsIndex) {
     const spreadInfo = await getSpreadInfo(spreadsheetId)
     if (!spreadInfo) return
@@ -429,5 +489,6 @@ module.exports = {
     isHasSheet,
     fillRow,
     insertRows,
+    updateRows,
     deleteRows,
 }

@@ -52,6 +52,11 @@ router.post('/insertRows', async function (req, res, next) {
     const data = await sheet_table.insertRows(name, rows);
     res.json(data);
 });
+router.post('/updateRows', async function (req, res, next) {
+    const {name, row, conditions} = req.body
+    const data = await sheet_table.updateRows(name, row, conditions);
+    res.json(data);
+});
 router.post('/findOne', async function (req, res, next) {
     const {name, conditions} = req.body
     const data = await sheet_table.find(name, conditions, 1);
